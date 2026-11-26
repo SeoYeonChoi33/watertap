@@ -191,14 +191,36 @@ def _build_gac_cost_param_block(blk, contactor_type):
     ## parameters for each regen options
     blk.makeup_unit_cost_epa_coeff = pyo.Var()
     blk.makeup_unit_cost_epa_exp = pyo.Var()
+    ## kg**-1. dimensionless로 두고 식 안에서 pyo.units.kg**-1 곱하기(기존 WaterTAP 방식)
+    ## 그냥 여기 실제 단위를 붙이는 방식으로 하는 게 나을지?
     blk.regen_unit_cost_epa_coeff = pyo.Var()
     blk.regen_unit_cost_epa_exp = pyo.Var()
+    ## 얘도 마찬가지
     blk.tank_cost_coeff = pyo.Var()
     blk.tank_cost_exp = pyo.Var()
-    blk.tank_volume_factor = pyo.Var()
+    ## blk.tank_volume_factor = pyo.Var() <얘는 그냥 _cost_gac 안에 상수로 넣자
     blk.furnace_cost_coeff = pyo.Var()
     blk.furnace_cost_exp = pyo.Var()
-    blk.furnace_capacity_factor = pyo.Var()
+    ## blk.furnace_capacity_factor = pyo.Var() <얘도
+    blk.onsite_material_cost_coeff = pyo.Var()
+    blk.onsite_material_cost_exp = pyo.Var()
+    blk.onsite_labor_hours_coeff = pyo.Var()
+    blk.onsite_labor_hours_exp = pyo.Var()
+    blk.onsite_labor_cost = pyo.Var()
+    blk.onsite_elec_use_coeff = pyo.Var()
+    blk.onsite_elec_use_exp = pyo.Var()
+    blk.onsite_elec_unit_cost = pyo.Var()
+    blk.onsite_gas_use_coeff = pyo.Var()
+    blk.onsite_gas_unit_cost = pyo.Var()
+    blk.transport_unit_cost_nonhaz = pyo.Var()
+    blk.transport_unit_cost_haz = pyo.Var()
+    blk.transport_distance_nonhaz = pyo.Var()
+    blk.transport_distance_haz = pyo.Var()
+    blk.transport_min_charge = pyo.Var()
+    blk.max_waste_ship = pyo.Var()
+    blk.disposal_unit_cost_nonhaz = pyo.Var()
+    blk.disposal_unit_cost_haz = pyo.Var()
+
 
 def _cost_gac(blk, parameter_blk, regen_option):
     """
