@@ -10,6 +10,7 @@ import pyomo.environ as pyo
 from pyomo.network import Arc
 from idaes.core import FlowsheetBlock, UnitModelCostingBlock
 from idaes.core.util.initialization import propagate_state
+from idaes.core.util.model_statistics import degrees_of_freedom
 from idaes.models.unit_models import Feed, Product
 import idaes.core.util.scaling as iscale
 import math
@@ -31,36 +32,20 @@ def main():
         surface_diffusion_coefficient_type="calculated",
         diffusivity_calculation="HaydukLaudie",
         cost_contactor_type="gravity",
-        solute = "solute"
+        solute = "solute",
+        cphsdm_method="surrogate",
     )
-    ## 일단 지금은 cphsdm input으로 돌려보고 나중에 surrogate으로 바꿀 거라서 이후 cphsdm_method="surrogate" 넘겨주기
+
     initialize(m)
-    cost_params = m.fs.costing.gac_gravity
-    optimal_j = None
-    optimal_lcow = None
-    for j in range (1, 21):
-        cost_params.num_contactors_op.fix(j)
-        try:
-            optimize(m)
-        except (RuntimeError, ValueError):
-            continue
-        lcow = pyo.value(m.fs.costing.LCOW)
-        if optimal_lcow is None or lcow < optimal_lcow:
-            optimal_lcow = lcow
-            optimal_j = j
-    if optimal_j is None:
-        raise RuntimeError("Convergence failed")
-    cost_params.num_contactors_op.fix(optimal_j)
     res = optimize(m)
     print_results(m, res, cost_contactor_type="gravity") ## function for printing results should be added
-                        ## print_results should include res.solver.termination_condition
+                        ## print_results may include res.solver.termination_condition
 
     return m
 
 ## contactor type has pressure type and gravity type
 ## For now, only gravity type considered - lines for pressure type will be added
-## Roadmap : optimization for -
-##      EBCT, loading rate(calculated by bed length & EBCT), contactor number, contactor dimension, and resulting optimal LCOW
+## Roadmap : optimization for EBCT & contactor number
 ##      consider range limit for each var
 ##      for costing, regen(on-site, off-site(non-haz & haz), disposal(non-haz & haz)
 ##      unfixed vars can be fixed by user
@@ -81,8 +66,8 @@ def build(
     solute_data = {"solute":dict(mw = 0.08, mv = 1e-4, freund_k = 10, freund_ninv = 0.9, diffus = 1e-9, conc_feed = 0.1),}
     data = solute_data[solute]
         ## conc_feed [kg/m3]
-        ## other PFAS data will be added
-        ## "solute" reference from flowsheets\gac\gac.py ; 잘 돌아가나 확인용
+        ## other PFAS data will be added (PFOS, PFOA,...)
+        ## "solute" reference from flowsheets\gac\gac.py
     if (
         film_transfer_coefficient_type == "calculated"
         or surface_diffusion_coefficient_type == "calculated"  ## kf or ds is unfixed -> 어떤 property package를 넘겨줄 것인가
@@ -130,13 +115,12 @@ def build(
     m.fs.s03 = Arc(source=m.fs.gac.adsorbed, destination=m.fs.adsorbed_removed.inlet)
     pyo.TransformationFactory("network.expand_arcs").apply_to(m)
 
+    add_costing(m, cost_contactor_type=cost_contactor_type)
+
+    ## scaling
     flow_vol_q = 0.043813  ## [m3/s], reference 값
     flow_mass_water = flow_vol_q * 1000  ## [kg/s]
     flow_mass_solute = flow_vol_q * data["conc_feed"]  ## [kg/s]
-
-    add_costing(m, cost_contactor_type=cost_contactor_type, flow_vol_q=flow_vol_q)
-
-    ## scaling
 
     if material_flow_basis == "molar":
         flow_water = flow_mass_water / 0.018  ## [mol/s]
@@ -177,15 +161,9 @@ def build(
     ## bed & design spec
     m.fs.gac.bed_voidage.fix(0.4)
     m.fs.gac.ebct.fix(600)  ## optimize에서 unfix
-    m.fs.gac.bed_length.fix(3)  ## optimize에서 unfix
+    m.fs.gac.bed_length.fix(6) ## gravity - 1MGD 미만 6ft, 1MGD 이상 8ft로 fix
     ## velocity_sup = loading rate = bed length / ebct
     m.fs.gac.conc_ratio_replace.fix(0.50)
-
-    ## new variables
-    m.fs.unit_width = pyo.Var(initialize=3, units=pyo.units.m)
-    m.fs.unit_area = pyo.Var(initialize=9, units=pyo.units.m ** 2)
-    m.fs.eq_unit_area = pyo.Constraint(expr=m.fs.unit_area == m.fs.unit_width ** 2)
-    m.fs.eq_bed_area = pyo.Constraint(expr=m.fs.gac.bed_area == m.fs.costing.gac_gravity.num_contactors_op * m.fs.unit_area)
 
     ## parameters
     if cphsdm_method == "input":   ## reference : 1/n = 0.9 기준. alternate if 1/n changes as solute changes
@@ -205,9 +183,6 @@ def build(
         m.fs.gac.particle_porosity.fix()
         m.fs.gac.tort.fix()
         m.fs.gac.spdfr.fix()
-
-    ## 목적함수
-    m.fs.obj = pyo.Objective(expr=m.fs.costing.LCOW)
 
     return m
 
@@ -242,23 +217,17 @@ def initialize(m, solver=None):
 
 
 def optimize(m, solver=None):
+    ## EBCT & n_op를 LCOW에 대해 최적화
     ## reference ; EBCT(600s) < minimum EBCT(2867s) (to satisfy CPHSDM's constant pattern assumption)
     ## Therefore, constraints that makes optimized EBCT larger than the minimum EBCT should be added (ebct >= min_ebct)
 
     if solver is None:
         solver = get_solver()
 
-    m.fs.unit_width.setlb(6 * pyo.units.ft)
-    m.fs.unit_width.setub(30 * pyo.units.ft)
-    m.fs.gac.bed_length.unfix()
-    m.fs.gac.bed_length.setlb(3 * pyo.units.ft)
-    m.fs.gac.bed_length.setub(10 * pyo.units.ft)
-    m.fs.gac.ebct.unfix()
-    m.fs.gac.ebct.setlb(456)
-    m.fs.gac.ebct.setub(1560)
-
     ## check model ; units
     assert_units_consistent(m)
+    print(f"Optimizing with {(degrees_of_freedom(m))} DOF")
+
     ## solve
     res = solver.solve(m)
     pyo.assert_optimal_termination(res)
@@ -266,9 +235,9 @@ def optimize(m, solver=None):
     return res
 
 
-def add_costing(m, cost_contactor_type = "pressure", flow_vol_q = 0.043813):
+def add_costing(m, cost_contactor_type = "pressure"):
     m.fs.costing = WaterTAPCosting()
-    m.fs.costing.base_currency = pyo.units.USD_2021  ## 년도 어떻게 할지??
+    m.fs.costing.base_currency = pyo.units.USD_2021  ## 이거 2026으로 해야 하나??
     m.fs.gac.costing = UnitModelCostingBlock(
         flowsheet_costing_block=m.fs.costing,
         costing_method_arguments={"contactor_type": cost_contactor_type},
@@ -279,20 +248,15 @@ def add_costing(m, cost_contactor_type = "pressure", flow_vol_q = 0.043813):
     treated_flow = m.fs.product.properties[0].flow_vol  ## product의 flow_vol
     m.fs.costing.add_LCOW(treated_flow)  ## treated_flow 이용해 LCOW 계산
 
-    flow_vol_q_mgd = pyo.units.convert_value(flow_vol_q, from_units=pyo.units.m ** 3 / pyo.units.s, to_units=pyo.units.Mgallon / pyo.units.day, )
-
     ## costing specifications
     if cost_contactor_type == ContactorType.pressure:
-        m.fs.costing.gac_pressure.regen_frac.fix(0.7)
+        m.fs.costing.gac_pressure.regen_frac.fix(0.7)  ## regen option 따라 0.9 (on-site) 또는 0.7(off-site)로 바꿔주기
         m.fs.costing.gac_pressure.num_contactors_op.fix(1)
         m.fs.costing.gac_pressure.num_contactors_redundant.fix(1)
-    else:  ## gravity
+    else:
         m.fs.costing.gac_gravity.regen_frac.fix(0.7)
         m.fs.costing.gac_gravity.num_contactors_op.fix(1)
-        if flow_vol_q_mgd >= 10:
-            m.fs.costing.gac_gravity.num_contactors_redundant.fix(2)
-        else:  ## Q<1 일 때는 EPA 기준 gravity type에서 주어진 redundant contactor number 없음
-            m.fs.costing.gac_gravity.num_contactors_redundant.fix(1)
+        m.fs.costing.gac_gravity.num_contactors_redundant.fix(1)
 
 
 def print_results(m, res, cost_contactor_type):
@@ -303,18 +267,12 @@ def print_results(m, res, cost_contactor_type):
     print(f"EBCT: {pyo.value(m.fs.gac.ebct):.2f} [s]")
     print(f"Bed Length: {pyo.value(m.fs.gac.bed_length):.2f} [m]")
     print(f"Loading Rate: {pyo.value(m.fs.gac.velocity_sup)*3600:.2f} [m/h]")
-
-    contactor_numbers = getattr(m.fs.costing, f"gac_{cost_contactor_type}")
-    n_op = int(pyo.value(contactor_numbers.num_contactors_op))
-    n_red = int(pyo.value(contactor_numbers.num_contactors_redundant))
-
-    print(f"Total bed area / Total bed volume: {pyo.value(m.fs.gac.bed_area):.2f} [m2] / {pyo.value(m.fs.gac.bed_volume):.2f} [m3]")
-    ## operating만 고려
-    print(f"Unit bed width / Unit bed area / Unit bed volume: {pyo.value(m.fs.unit_width):.2f} [m] / {pyo.value(m.fs.unit_area):.2f} [m2] / {pyo.value(m.fs.gac.bed_volume)/n_op:.2f} [m3]")
-    ## ft로 할지 아니면 그냥 m로 해도 ㄱㅊ을지?? 엑셀이랑 비교할 거 생각하면 ft로 변환하는 게 낫나 싶긴 한데 음
-    print(f"Number of total contactors: {n_op + n_red}")
-    print(f"Number of operating contactors: {n_op}")
-    print(f"Number of redundant contactors: {n_red}")
+    print(f"Bed Diameter/Area/Volume: {pyo.value(m.fs.gac.bed_diameter):.2f} [m] / {pyo.value(m.fs.gac.bed_area):.2f} [m2] / {pyo.value(m.fs.gac.bed_volume):.2f} [m3]")
+    ## 전체 diameter랑 area랑 volume이라서 나중에 n_contactor로 나눠주자
+    if cost_contactor_type == ContactorType.pressure:
+        print(f"Number of contactors: {int(pyo.value(m.fs.costing.gac_pressure.num_contactors_op))}")
+    else:
+        print(f"Number of contactors: {int(pyo.value(m.fs.costing.gac_gravity.num_contactors_op))}")
     print(f"GAC Mass filled in bed: {pyo.value(m.fs.gac.bed_mass_gac):.2f} [kg]")
     print(f"EBCT Minimal: {pyo.value(m.fs.gac.min_ebct):.2f} [s]")
     ## regen type도 어떤 걸로 했는지 나중에 추가해줘야 함

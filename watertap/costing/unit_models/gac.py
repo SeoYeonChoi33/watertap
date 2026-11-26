@@ -29,7 +29,7 @@ class ContactorType(StrEnum):
     gravity = "gravity"
 
 
-def cost_gac(blk, contactor_type=ContactorType.pressure):
+def cost_gac(blk, contactor_type=ContactorType.pressure, regen_option="watertap"):
     """
     3 equation capital cost estimation for GAC systems with: (i), contactor/pressure vessel cost by polynomial as a
     function of individual contactor volume; (ii), initial charge of GAC adsorbent cost by exponential as a function of
@@ -45,9 +45,9 @@ def cost_gac(blk, contactor_type=ContactorType.pressure):
 
     # costing data parameters based on contactor type
     if contactor_type == ContactorType.pressure:
-        cost_gac_pressure(blk)
+        cost_gac_pressure(blk, regen_option)
     elif contactor_type == ContactorType.gravity:
-        cost_gac_gravity(blk)
+        cost_gac_gravity(blk, regen_option)
     else:
         raise ConfigurationError(
             f"{blk.unit_model.name} received invalid argument for contactor_type:"
@@ -67,7 +67,7 @@ def build_gac_cost_param_block_gravity(blk):
     build_rule=build_gac_cost_param_block_pressure,
     parameter_block_name="gac_pressure",
 )
-def cost_gac_pressure(blk):
+def cost_gac_pressure(blk, regen_option="watertap"):
     """
     3 equation capital cost estimation for GAC systems with: (i), contactor/pressure vessel cost by polynomial as a
     function of individual contactor volume; (ii), initial charge of GAC adsorbent cost by exponential as a function of
@@ -79,14 +79,14 @@ def cost_gac_pressure(blk):
     This function costs assuming steel pressure-fed vessels.
     """
     parameter_blk = blk.costing_package.gac_pressure
-    _cost_gac(blk, parameter_blk)
+    _cost_gac(blk, parameter_blk, regen_option)
 
 
 @register_costing_parameter_block(
     build_rule=build_gac_cost_param_block_gravity,
     parameter_block_name="gac_gravity",
 )
-def cost_gac_gravity(blk):
+def cost_gac_gravity(blk, regen_option="watertap"):
     """
     3 equation capital cost estimation for GAC systems with: (i), contactor/pressure vessel cost by polynomial as a
     function of individual contactor volume; (ii), initial charge of GAC adsorbent cost by exponential as a function of
@@ -98,11 +98,10 @@ def cost_gac_gravity(blk):
     This function costs assuming concrete gravity-fed basins.
     """
     parameter_blk = blk.costing_package.gac_gravity
-    _cost_gac(blk, parameter_blk)
+    _cost_gac(blk, parameter_blk, regen_option)
 
 
 def _build_gac_cost_param_block(blk, contactor_type):
-
     adsorbent_unit_cost_coeff_data = {0: 4.58342, 1: -1.25311e-5}
     if contactor_type == ContactorType.pressure:
         contactor_cost_coeff_data = {0: 10010.9, 1: 2204.95, 2: -15.9378, 3: 0.110592}
@@ -132,7 +131,7 @@ def _build_gac_cost_param_block(blk, contactor_type):
         doc="number of off-line redundant GAC contactors in parallel",
     )
     blk.regen_frac = pyo.Var(
-        initialize=0.70,
+        initialize=0.70,  ## on-site 0.9, off-site 0.7, disposal x
         units=pyo.units.dimensionless,
         doc="fraction of spent GAC adsorbent that can be regenerated for reuse",
     )
@@ -189,8 +188,10 @@ def _build_gac_cost_param_block(blk, contactor_type):
         doc="energy consumption polynomial coefficients",
     )
 
+    ## parameters for each regen options
 
-def _cost_gac(blk, parameter_blk):
+
+def _cost_gac(blk, parameter_blk, regen_option):
     """
     3 equation capital cost estimation for GAC systems with: (i), contactor/pressure vessel cost by polynomial as a
     function of individual contactor volume; (ii), initial charge of GAC adsorbent cost by exponential as a function of
@@ -204,6 +205,9 @@ def _cost_gac(blk, parameter_blk):
     """
 
     # ---------------------------------------------------------------------
+    allowed = ["watertap", "onsite", "offsite_nonhaz", "offsite_haz", "disposal_nonhaz", "disposal_haz"]
+    if regen_option not in allowed:
+        raise ConfigurationError(f"{blk.unit_model.name} received invalid regen option. Regen option must be one of {allowed}.")
 
     make_capital_cost_var(blk)
     blk.contactor_cost = pyo.Var(
