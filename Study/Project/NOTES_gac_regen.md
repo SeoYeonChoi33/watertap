@@ -57,9 +57,7 @@
 | `makeup_unit_cost_epa_coeff` / `_exp` | 4.6333 / −1.2427e-5 | USD_2021/kg / kg⁻¹ |
 | `regen_unit_cost_epa_coeff` / `_exp` | 4.3914 / −2.9154e-5 | USD_2021/kg / kg⁻¹ |
 | `tank_cost_coeff` / `_exp` | 308.94 / 0.5015 | USD_2021 (연도 확인 필요) / 무차원 |
-| `tank_volume_factor` | 1.33 | 무차원 |
 | `furnace_cost_coeff` / `_exp` | 97378.2 / 0.3834 | USD_2021 (연도 확인 필요) / 무차원 |
-| `furnace_capacity_factor` | 1.177 | 무차원 (= 1.0 / 0.85 가동률) |
 | `onsite_material_cost_coeff` / `_exp` | 8451.4 / 0.2017 | USD_2021/yr (연도 확인 필요, 2000 추정) / 무차원 |
 | `onsite_labor_hours_coeff` / `_exp` | 2.2515 / 0.7554 | hr/yr / 무차원 |
 | `onsite_elec_use_coeff` / `_exp` | 9.1217 / 1.0475 | kWh/yr / 무차원 |
@@ -74,6 +72,9 @@
 | `disposal_unit_cost_nonhaz` / `_haz` | 110.04 / 363.41 | USD_2021/ton |
 | (재사용) `bed_mass_max_ref` | 18143.7 kg (= 40,000 lb) | 기존 |
 
+- **설계 가정값 1.33과 1.177은 파라미터로 만들지 않는다.** sensitivity를 하지 않으므로 `_cost_gac` 안에 이름 붙인 파이썬 상수로 두고 바로 곱한다.
+  - `tank_volume_factor = 1.33` (bed volume → tank volume)
+  - `regen_capacity_factor = 1.0 / 0.85` (= 1.177, 여유 용량 1.0 / furnace 연간 가동률 0.85)
 - Pyomo 단위: `ton`(short ton = 907.18 kg), `mi`, `lb`, `gal`, `kWh`, `therm`, `hr`, `year`, `day`, `ft`. 통화는 `USD_2000`~`USD_2023`만 있다 (2024 이후 없음).
 - 확인 방법: 다 넣은 뒤 `python watertap/flowsheets/gac/gac.py`를 돌려서 LCOW 0.5636이 그대로 나오면 된다.
 
@@ -152,8 +153,16 @@ non-haz와 같고, 운송비가 추가된다:
 
 ### 아직 안 정한 것
 - **USD 연도:** furnace, tank, material, 최소 운송비 3392. 일단 USD_2021로 가정한다.
-- **maintenance factor(CAPEX의 3%)와 on-site O&M 중복:** furnace에는 3%를 빼고 tank에는 둔다는 쪽으로 기울어 있음. 교수님과 상의할 예정.
-  - 방법 후보: `m.fs.costing.maintenance_labor_chemical_factor.fix(0)` + costing 안에서 `0.03 × (contactor + adsorbent + other)`
+### 결정: TIC
+- WaterTAP TIC(기본 2.0)는 **간접비 계수**다 (`add_cost_factor`: "indirect capital cost multiplier"). EPA furnace, tank 비용은 설치, 운송, O&P를 포함한 **직접비**다.
+- 그래서 tank와 furnace도 기존 괄호 안에 더해서 TIC를 곱한다: `capital_cost = TIC × (contactor + adsorbent + other + tank + furnace)`. 이중 계산이 아니다.
+- TIC 2.0은 EPA 간접비 비율(약 1.47)보다 크지만, EPA와 절대값을 비교하는 연구가 아니므로 **sensitivity는 하지 않는다.**
+- 나중에 contactor 회귀식을 새로 만들 때도 EPA **직접비**로 회귀한다 (TIC와 겹치지 않게).
+
+### 결정: maintenance factor 중복 처리
+- WaterTAP은 `maintenance_labor_chemical_factor`(0.03/yr) × `aggregate_capital_cost`(TIC가 곱해진 값의 합)를 OPEX에 자동으로 더한다.
+- **EPA가 별도 O&M을 주는 설비(on-site furnace)만 3%를 빼고 EPA 방식만 쓴다.** tank는 EPA O&M이 없으므로 3%를 그대로 둔다 (논의 끝).
+- 구현: on-site 옵션의 `fixed_operating_cost`에 `− maintenance_labor_chemical_factor × TIC(blk.cost_factor) × furnace_cost`를 넣는다. 전역 factor를 건드리지 않으니 `"watertap"` 옵션과 reference flowsheet는 그대로다.
 - base_currency 연도는 보류. 나중에 USD2023으로 통일할 수도 있다.
 
 ## 4. 최적화 (보류. regen costing을 끝낸 뒤에)

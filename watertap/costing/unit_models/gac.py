@@ -189,7 +189,16 @@ def _build_gac_cost_param_block(blk, contactor_type):
     )
 
     ## parameters for each regen options
-
+    blk.makeup_unit_cost_epa_coeff = pyo.Var()
+    blk.makeup_unit_cost_epa_exp = pyo.Var()
+    blk.regen_unit_cost_epa_coeff = pyo.Var()
+    blk.regen_unit_cost_epa_exp = pyo.Var()
+    blk.tank_cost_coeff = pyo.Var()
+    blk.tank_cost_exp = pyo.Var()
+    blk.tank_volume_factor = pyo.Var()
+    blk.furnace_cost_coeff = pyo.Var()
+    blk.furnace_cost_exp = pyo.Var()
+    blk.furnace_capacity_factor = pyo.Var()
 
 def _cost_gac(blk, parameter_blk, regen_option):
     """
