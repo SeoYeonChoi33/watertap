@@ -14,6 +14,8 @@ import pyomo.environ as pyo
 from idaes.core.util.exceptions import ConfigurationError
 from idaes.core.util.misc import StrEnum
 from idaes.core.util.math import smooth_min
+from idaes.models_extra.power_generation.flowsheets.subcritical_power_plant.subcritical_boiler_flowsheet import \
+    initialize
 
 from watertap.custom_exceptions import FrozenPipes
 
@@ -191,7 +193,7 @@ def _build_gac_cost_param_block(blk, contactor_type):
     ## parameters for each regen options
     blk.makeup_unit_cost_epa_coeff = pyo.Var(
         initialize=4.6333,
-        units=pyo.units.USD_2021/kg,
+        units=pyo.units.USD_2021/pyo.units.kg,
         doc=""
     )
     blk.makeup_unit_cost_epa_exp = pyo.Var(
@@ -199,14 +201,38 @@ def _build_gac_cost_param_block(blk, contactor_type):
         units=pyo.units.kg**-1,
         doc=""
     )
-    blk.regen_unit_cost_epa_coeff = pyo.Var()
-    blk.regen_unit_cost_epa_exp = pyo.Var()
-    blk.tank_cost_coeff = pyo.Var()
-    blk.tank_cost_exp = pyo.Var()
-    ## blk.tank_volume_factor = pyo.Var() <얘는 그냥 _cost_gac 안에 상수로 넣자
-    blk.furnace_cost_coeff = pyo.Var()
-    blk.furnace_cost_exp = pyo.Var()
-    ## blk.furnace_capacity_factor = pyo.Var() <얘도
+    blk.regen_unit_cost_epa_coeff = pyo.Var(
+        initialize=4.3914,
+        units=pyo.units.USD_2021/pyo.units.kg,
+        doc=""
+    )
+    blk.regen_unit_cost_epa_exp = pyo.Var(
+        initialize=-2.9154e-5,
+        units=pyo.units.kg**-1,
+        doc=""
+    )
+    blk.tank_cost_coeff = pyo.Var(
+        initialize=308.94,
+        units=pyo.units.USD_2021,  ## 확인 필요
+        doc=""
+    )
+    blk.tank_cost_exp = pyo.Var(
+        initialize=0.5015,
+        units=pyo.units.dimensionless,
+        doc=""
+    )
+    ## blk.tank_volume_factor <얘는 그냥 _cost_gac 안에 상수로 넣자 (1.33)
+    blk.furnace_cost_coeff = pyo.Var(
+        initialize=97378.2,
+        units=pyo.units.USD_2021,
+        doc=""
+    )
+    blk.furnace_cost_exp = pyo.Var(
+        initialize=0.3834,
+        units=pyo.units.dimensionless,
+        doc=""
+    )
+    ## blk.furnace_capacity_factor <얘도 (1/0.85)
     blk.onsite_material_cost_coeff = pyo.Var()
     blk.onsite_material_cost_exp = pyo.Var()
     blk.onsite_labor_hours_coeff = pyo.Var()
